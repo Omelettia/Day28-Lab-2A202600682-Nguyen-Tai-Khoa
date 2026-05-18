@@ -25,7 +25,9 @@ Kaggle (GPU T4/P100):
 - Docker Desktop đang chạy
 - Python 3.10+
 - Tài khoản Kaggle với GPU đã bật
-- `ngrok` đã cài và token configured
+- **Tunnel service** (chọn 1 trong 2):
+  - `ngrok` đã cài và token configured
+  - HOẶC `cloudflared` đã cài (`brew install cloudflare/cloudflare/cloudflared`)
 
 ## Quick Start
 
@@ -48,13 +50,15 @@ docker compose ps  # Kiểm tra tất cả services Up
 
 Tạo Kaggle Notebook với GPU T4 x2, chạy:
 
+**Option A: Dùng ngrok**
+
 ```python
 # Cell 1: Install dependencies
 !pip install -q vllm fastapi uvicorn pyngrok mlflow sentence-transformers
 
 # Cell 2: Setup ngrok
 from pyngrok import ngrok
-ngrok.set_auth_token("YOUR_NGROK_TOKEN")
+ngrok.set_auth_token("YOUR_NGROK_TOKEN")  # lấy tại ngrok.com
 
 # Cell 3: Start vLLM server
 import subprocess, threading, time
@@ -78,12 +82,41 @@ tunnel = ngrok.connect(8001, "http")
 print(f"vLLM URL: {tunnel.public_url}")
 ```
 
+**Option B: Dùng cloudflared**
+
+```python
+# Cell 1: Install dependencies
+!pip install -q vllm fastapi uvicorn cloudflared mlflow sentence-transformers
+
+# Cell 2: Start vLLM server
+import subprocess, threading, time
+
+def run_vllm():
+    subprocess.run([
+        "python", "-m", "vllm.entrypoints.openai.api_server",
+        "--model", "Qwen/Qwen2.5-7B-Instruct-GPTQ-Int4",
+        "--port", "8001",
+        "--max-model-len", "4096",
+        "--gpu-memory-utilization", "0.85"
+    ])
+
+thread = threading.Thread(target=run_vllm, daemon=True)
+thread.start()
+time.sleep(60)
+print("vLLM server started")
+
+# Cell 3: Create cloudflare tunnel
+import subprocess
+tunnel = subprocess.run(["cloudflared", "tunnel", "--url", "http://localhost:8001"], capture_output=True, text=True)
+print(tunnel.stdout)  # URL sẽ hiển thị
+```
+
 ### 3. Cập nhật Environment Variables
 
 ```bash
 # Copy và chỉnh sửa file .env
 cp .env.example .env
-# Thay VLLM_NGROK_URL với URL từ Kaggle Cell 4
+# Thay VLLM_NGROK_URL với URL từ Kaggle (ngrok hoặc cloudflared)
 # Thay EMBED_NGROK_URL nếu có embedding service
 # Thay LANGCHAIN_API_KEY với key của bạn
 ```
@@ -177,7 +210,3 @@ docker exec lab28-kafka-1 kafka-topics --list --bootstrap-server localhost:9092
 ## Nộp Bài
 
 Xem `SUBMISSION.md` ở thư mục gốc project.
-
-## License
-
-Edu

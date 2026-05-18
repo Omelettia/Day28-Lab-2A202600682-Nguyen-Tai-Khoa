@@ -179,13 +179,15 @@ docker compose ps   # kiểm tra tất cả services đang Up
 
 ---
 
-## PHẦN 2 — Kaggle GPU Setup & Expose qua ngrok
+## PHẦN 2 — Kaggle GPU Setup & Expose qua Tunnel
 
 **Mục tiêu:** Chạy vLLM serving trên Kaggle GPU, expose port ra để local gọi được.
 
 ### Bước 2.1 — Tạo Kaggle Notebook
 
-Tạo notebook mới trên Kaggle, bật **GPU T4 x2**, paste code sau:
+Tạo notebook mới trên Kaggle, bật **GPU T4 x2**, chọn 1 trong 2 option:
+
+**Option A: Dùng ngrok**
 
 ```python
 # Cell 1 — Cài dependencies
@@ -219,7 +221,40 @@ print(f"vLLM URL (copy this): {vllm_url}")
 # → Paste URL này vào file .env trên local
 ```
 
+**Option B: Dùng cloudflared**
+
+```python
+# Cell 1 — Cài dependencies
+!pip install -q vllm fastapi uvicorn cloudflared mlflow sentence-transformers
+
+# Cell 2 — Khởi động vLLM server
+import subprocess, threading, time
+
+def run_vllm():
+    subprocess.run([
+        "python", "-m", "vllm.entrypoints.openai.api_server",
+        "--model", "Qwen/Qwen2.5-7B-Instruct-GPTQ-Int4",
+        "--port", "8001",
+        "--max-model-len", "4096",
+        "--gpu-memory-utilization", "0.85"
+    ])
+
+thread = threading.Thread(target=run_vllm, daemon=True)
+thread.start()
+time.sleep(60)  # chờ model load
+print("vLLM server started")
+
+# Cell 3 — Tạo cloudflare tunnel
+import subprocess
+tunnel = subprocess.run(["cloudflared", "tunnel", "--url", "http://localhost:8001"], capture_output=True, text=True)
+print(f"vLLM URL (copy from output):")
+print(tunnel.stdout)
+# → Paste URL này vào file .env trên local
+```
+
 ### Bước 2.2 — Embedding service trên Kaggle
+
+**Nếu dùng ngrok:**
 
 ```python
 # Cell 5 — Embedding API server
@@ -244,12 +279,43 @@ embed_tunnel = ngrok.connect(8002, "http")
 print(f"Embedding URL: {embed_tunnel.public_url}")
 ```
 
+**Nếu dùng cloudflared:**
+
+```python
+# Cell 4 — Embedding API server
+from fastapi import FastAPI
+from sentence_transformers import SentenceTransformer
+import uvicorn, threading
+
+app = FastAPI()
+model = SentenceTransformer("BAAI/bge-small-en-v1.5")
+
+@app.post("/embed")
+def embed(data: dict):
+    texts = data["texts"]
+    embeddings = model.encode(texts).tolist()
+    return {"embeddings": embeddings}
+
+def run_embed():
+    uvicorn.run(app, host="0.0.0.0", port=8002)
+
+threading.Thread(target=run_embed, daemon=True).start()
+import subprocess
+embed_tunnel = subprocess.run(["cloudflared", "tunnel", "--url", "http://localhost:8002"], capture_output=True, text=True)
+print(f"Embedding URL (copy from output):")
+print(embed_tunnel.stdout)
+```
+
 ### Bước 2.3 — Cập nhật `.env` trên local
 
 ```bash
 # lab28/.env
+# Nếu dùng ngrok:
 VLLM_NGROK_URL=https://xxxx.ngrok-free.app   # từ Cell 4
 EMBED_NGROK_URL=https://yyyy.ngrok-free.app   # từ Cell 5
+# Nếu dùng cloudflared:
+# VLLM_NGROK_URL=https://xxxx.trycloudflare.com   # từ Cell 3
+# EMBED_NGROK_URL=https://yyyy.trycloudflare.com   # từ Cell 4
 LANGCHAIN_API_KEY=your_langsmith_key
 LANGCHAIN_PROJECT=lab28-platform
 ```
