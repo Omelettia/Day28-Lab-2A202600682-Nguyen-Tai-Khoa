@@ -104,6 +104,9 @@ services:
     image: ollama/ollama:latest
     ports:
       - "11434:11434"
+    environment:
+      # Keep the model resident in VRAM so there is no cold-start latency spike.
+      OLLAMA_KEEP_ALIVE: "-1"
     volumes:
       - ollama_data:/root/.ollama
     deploy:
@@ -125,6 +128,7 @@ services:
       VLLM_URL: ${VLLM_NGROK_URL:-http://ollama:11434/v1}
       MODEL_NAME: ${MODEL_NAME:-qwen2.5:3b}
       LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-160}
       QDRANT_URL: http://qdrant:6333
       REDIS_URL: redis://redis:6379
       # Integration 10: traces to LangSmith (read from .env)

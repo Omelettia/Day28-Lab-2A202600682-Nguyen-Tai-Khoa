@@ -26,6 +26,9 @@ MODEL_NAME = os.environ.get("MODEL_NAME", "qwen2.5:3b")
 # Optional bearer token for hosted OpenAI-compatible APIs (Groq, OpenRouter, ...).
 # Left unset for local Ollama, which needs no auth.
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
+# Cap generation so latency is bounded and predictable (keeps the P95 SLO on a
+# small local GPU); tune per model/hardware via LLM_MAX_TOKENS.
+LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "160"))
 
 
 class ChatRequest(BaseModel):
@@ -66,6 +69,7 @@ async def llm_inference(prompt: str) -> dict:
             json={
                 "model": MODEL_NAME,
                 "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": LLM_MAX_TOKENS,
             },
         )
         resp.raise_for_status()
