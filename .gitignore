@@ -149,6 +149,9 @@ activemq-data/
 # SageMath parsed files
 *.sage.py
 
+# Lab28 runtime output (parquet batches produced by the Prefect flow)
+delta-lake/
+
 # Environments
 .env
 .envrc
@@ -218,5 +221,3 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-
-ANSWERS.md

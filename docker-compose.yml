@@ -1,5 +1,8 @@
 # docker-compose.yml
-version: "3.9"
+# Fixed project name so container names are stable (e.g. lab28-kafka-1),
+# which the readiness check (docker exec lab28-kafka-1 ...) and the
+# troubleshooting commands in the README rely on.
+name: lab28
 
 services:
   # ── Kafka Stack ──────────────────────────────────────────
@@ -18,7 +21,14 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      # Dual listeners: host clients reach the broker at localhost:9092 (EXTERNAL),
+      # while containers on this network reach it at kafka:29092 (INTERNAL).
+      # A single advertised "localhost:9092" would make in-network consumers
+      # (the Prefect worker) fail after bootstrap.
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
   # ── Prefect ───────────────────────────────────────────────
@@ -32,11 +42,20 @@ services:
 
   prefect-worker:
     image: prefecthq/prefect:2.14.0-python3.10
+    # Install flow deps at start (3 attempts, --no-cache-dir → survives a flaky/
+    # corrupted download), then create the process work pool and start the worker.
+    # numpy<2: pandas 2.1.0 / pyarrow 14 are built against the numpy 1.x ABI and
+    # crash ("numpy.dtype size changed") if numpy 2.x is pulled.
     command: >
-      sh -c "prefect work-pool create --type process lab28-worker 2>/dev/null || true
-      && prefect worker start -p lab28-worker -n lab28-worker"
+      sh -c "pip install --no-cache-dir 'numpy<2' kafka-python==2.0.2 pandas==2.1.0 pyarrow==14.0.0 ||
+      pip install --no-cache-dir 'numpy<2' kafka-python==2.0.2 pandas==2.1.0 pyarrow==14.0.0 ||
+      pip install --no-cache-dir 'numpy<2' kafka-python==2.0.2 pandas==2.1.0 pyarrow==14.0.0;
+      prefect work-pool create --type process lab28-worker 2>/dev/null || true;
+      prefect worker start -p lab28-worker -n lab28-worker"
     environment:
       PREFECT_API_URL: http://prefect-orion:4200/api
+      # In-network Kafka endpoint (matches KAFKA_ADVERTISED_LISTENERS INTERNAL).
+      KAFKA_BOOTSTRAP: kafka:29092
     volumes:
       - ./prefect/flows:/opt/prefect/flows
       - ./delta-lake:/opt/delta-lake
@@ -72,6 +91,28 @@ services:
       - "3000:3000"
     environment:
       GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      # Auto-provision the Prometheus datasource + Lab28 dashboard (GitOps).
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+
+  # ── LLM Serving (Ollama, local GPU) ───────────────────────
+  # Replaces the Kaggle/vLLM GPU box. OpenAI-compatible API at :11434/v1.
+  # Pull a model after the stack is up:
+  #   docker compose exec ollama ollama pull qwen2.5:3b
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
   # ── API Gateway ───────────────────────────────────────────
   api-gateway:
@@ -79,11 +120,20 @@ services:
     ports:
       - "8000:8000"
     environment:
-      VLLM_URL: ${VLLM_NGROK_URL}
+      # Defaults to the local Ollama service. To use a hosted OpenAI-compatible
+      # API instead, set VLLM_NGROK_URL (+ LLM_API_KEY) in .env.
+      VLLM_URL: ${VLLM_NGROK_URL:-http://ollama:11434/v1}
+      MODEL_NAME: ${MODEL_NAME:-qwen2.5:3b}
+      LLM_API_KEY: ${LLM_API_KEY:-}
       QDRANT_URL: http://qdrant:6333
       REDIS_URL: redis://redis:6379
-    depends_on: [qdrant, redis]
+      # Integration 10: traces to LangSmith (read from .env)
+      LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-true}
+      LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
+      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-lab28-platform}
+    depends_on: [qdrant, redis, ollama]
 
 volumes:
   prefect_data:
   qdrant_data:
+  ollama_data:

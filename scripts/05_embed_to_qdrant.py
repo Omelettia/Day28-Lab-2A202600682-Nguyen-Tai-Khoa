@@ -1,29 +1,32 @@
 # scripts/05_embed_to_qdrant.py
-import requests
+# Embeddings run locally via fastembed (ONNX, CPU) — no remote/Kaggle service.
+#   pip install fastembed qdrant-client
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
-import os
+from fastembed import TextEmbedding
 
-EMBED_URL = os.environ["EMBED_NGROK_URL"]
+# BAAI/bge-small-en-v1.5 → 384-dim, matches the Qdrant collection below.
+embedder = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
 qdrant = QdrantClient(host="localhost", port=6333)
 
 # Tạo collection
 qdrant.recreate_collection(
     collection_name="documents",
-    vectors_config=VectorParams(size=384, distance=Distance.COSINE)
+    vectors_config=VectorParams(size=384, distance=Distance.COSINE),
 )
 
+
 def embed_and_store(records: list[dict]):
-    # Gọi Kaggle embedding service
-    response = requests.post(f"{EMBED_URL}/embed", json={"texts": [r["text"] for r in records]})
-    embeddings = response.json()["embeddings"]
+    # Embed locally (returns a generator of numpy arrays)
+    embeddings = [vec.tolist() for vec in embedder.embed([r["text"] for r in records])]
 
     points = [
         PointStruct(id=i, vector=emb, payload=rec)
         for i, (emb, rec) in enumerate(zip(embeddings, records))
     ]
     qdrant.upsert(collection_name="documents", points=points)
-    print(f"Integration 5 OK: {len(points)} vectors stored in Qdrant")
+    print(f"Integration 5 OK: {len(points)} vectors stored in Qdrant (local fastembed)")
+
 
 # Test với sample data
 embed_and_store([

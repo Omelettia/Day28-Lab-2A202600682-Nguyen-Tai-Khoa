@@ -3,14 +3,16 @@ global:
   scrape_interval: 15s
 
 scrape_configs:
+  # API Gateway exposes /metrics via prometheus-fastapi-instrumentator.
   - job_name: "api-gateway"
     static_configs:
       - targets: ["api-gateway:8000"]
 
-  - job_name: "kafka"
+  # Prometheus self-monitoring (keeps at least one always-green target).
+  - job_name: "prometheus"
     static_configs:
-      - targets: ["kafka:9092"]
+      - targets: ["localhost:9090"]
 
-  - job_name: "prefect-orion"
-    static_configs:
-      - targets: ["prefect-orion:4200"]
+  # NOTE: Kafka (9092) and Prefect (4200) do not expose a Prometheus /metrics
+  # endpoint out of the box — scraping them directly yields permanently "down"
+  # targets. Add a kafka-exporter / JMX exporter sidecar to monitor them.

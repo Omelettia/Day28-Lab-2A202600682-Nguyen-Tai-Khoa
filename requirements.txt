@@ -1,0 +1,13 @@
+# Host-side deps for scripts/*.py and smoke-tests/ (run outside Docker).
+# Ranges chosen so wheels exist on both Python 3.10 and 3.12.
+# kafka-python-ng is the maintained fork (same `import kafka`) that works on 3.12;
+# stock kafka-python==2.0.2 breaks on Python 3.12 (kafka.vendor.six.moves).
+kafka-python-ng>=2.2.0
+redis==5.0.1
+qdrant-client>=1.7,<2
+fastembed>=0.3,<0.5
+pandas>=2.2,<3
+pyarrow>=15,<18
+requests>=2.31
+langsmith>=0.1.0,<0.2.0
+pytest>=7.4
